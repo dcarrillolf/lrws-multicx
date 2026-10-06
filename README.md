@@ -1,7 +1,7 @@
 # Liferay Workspace Multi-Instance Client Extensions Builds
 
 > [!WARNING] 
-> The default mode relies on the `dxp.lxc.liferay.com.virtualInstanceId` property, which is **deprecated**. See [Working with Client Extensions → Configuring Client Extensions](https://learn.liferay.com/w/dxp/development/client-extensions/working-with-client-extensions). It still works in DXP 2026.Q1, but it may be removed in a future release. The one-zip-per-instance mode uses the supported `liferay.virtual.instance.id` Gradle property instead.
+> The default mode relies on the `dxp.lxc.liferay.com.virtualInstanceId` property, which is **deprecated**. See [Working with Client Extensions → Configuring Client Extensions](https://learn.liferay.com/w/dxp/development/client-extensions/working-with-client-extensions). It still works in DXP 2026.Q1, but it may be removed in a future release. The one-zip-per-instance mode uses the supported `liferay.virtual.instance.id` Gradle property instead, and the OSGi configuration mode follows option 2 of the KB article linked below.
 
 Liferay Workspace customization that builds Client Extensions (CX) for several virtual instances, driven by a per-environment configuration.
 > This is not an official Liferay product. Review it before using it in your own projects.
@@ -22,14 +22,15 @@ See also:
 
 ## Modes
 
-| | One zip, one block per instance (default) | One zip per instance |
-|---|---|---|
-| Enabled with | `-Pcx.custom.deploy.env=<env>` | `-Pcx.custom.deploy.env=<env> -Pcx.custom.one-per-instance=true` |
-| Plugin | `com.liferay.custom.cxmultiinstance` | `com.liferay.custom.cxperinstance` |
-| Output | `dist/<project>.zip` with one block per instance | `dist/<project>.zip` (default instance) and `dist/<project>_<webId>.zip` per instance |
-| Instance binding | `dxp.lxc.liferay.com.virtualInstanceId` | `liferay.virtual.instance.id` |
-| Static resources | Deployed once, shared by all instances (`/o/<project>/`) | Deployed once per instance (`/o/<project>_<webId>/`) |
-| Build time | One build | One Gradle run per instance |
+| | One zip, one block per instance (default) | One zip per instance | OSGi configuration files |
+|---|---|---|---|
+| Enabled with | `build -Pcx.custom.deploy.env=<env>` | `build -Pcx.custom.deploy.env=<env> -Pcx.custom.one-per-instance=true` | `generateCXConfig -Pcx.custom.deploy.env=<env>` |
+| Plugin | `com.liferay.custom.cxmultiinstance` | `com.liferay.custom.cxperinstance` | `com.liferay.custom.cxconfig` |
+| Output | `dist/<project>.zip` with one block per instance | `dist/<project>.zip` (default instance) and `dist/<project>_<webId>.zip` per instance | `configs/<env>/osgi/configs/…CETConfiguration~<id>--<webId>.config` per instance |
+| Instance binding | `dxp.lxc.liferay.com.virtualInstanceId` in the zip | `liferay.virtual.instance.id` | One OSGi `.config` file per instance |
+| Static resources | Deployed once, shared by all instances (`/o/<project>/`) | Deployed once per instance (`/o/<project>_<webId>/`) | Deployed once with the standard zip, shared by all instances (`/o/<project>/`) |
+| Build time | One build | One Gradle run per instance | One build |
+| CX types | All | All | `customElement` only (PoC) |
 
 ## What's included
 
@@ -38,7 +39,9 @@ See also:
 | `buildSrc/build.gradle` | Builds the local plugins (`groovy-gradle-plugin`). |
 | `buildSrc/src/main/groovy/com.liferay.custom.cxmultiinstance.gradle` | The `com.liferay.custom.cxmultiinstance` plugin (one zip, one block per instance). |
 | `buildSrc/src/main/groovy/com.liferay.custom.cxperinstance.gradle` | The `com.liferay.custom.cxperinstance` plugin (one zip per instance). |
-| `build.gradle` | Applies one of the plugins to every project under `client-extensions/` when `cx.custom.deploy.env` is set. |
+| `buildSrc/src/main/groovy/com.liferay.custom.cxconfig.gradle` | The `com.liferay.custom.cxconfig` plugin (`generateCXConfig` task, PoC). |
+| `buildSrc/src/main/resources/cx-config-templates/` | One `.config` template per CX type for `generateCXConfig`. Only `customElement.config` for now. |
+| `build.gradle` | Applies the plugins to every project under `client-extensions/`. `cxconfig` is always applied; the build plugins only when `cx.custom.deploy.env` is set. |
 | `gradle.properties` | Example instance lists per environment. |
 
 ## Configuration
@@ -46,19 +49,19 @@ See also:
 Define the instances of each environment in `gradle.properties`:
 
 ```properties
-cx.build.custom.env.instances[sample]=default,localhost2,localhost3
-cx.build.custom.env.instances[sample-other]=localhost2,localhost3
+cx.build.custom.env.instances[dev]=default,localhost2,localhost3
+cx.build.custom.env.instances[uat]=localhost2,localhost3
 ```
 
 | Property | Where | Description |
 |---|---|---|
-| `cx.custom.deploy.env` | Command line (`-P`) | Environment to build for. If not set, no plugin is applied and every CX is built from its `client-extension.yaml` as is. |
+| `cx.custom.deploy.env` | Command line (`-P`) | Environment to build or generate the configuration for. If not set, every CX is built from its `client-extension.yaml` as is. |
 | `cx.custom.one-per-instance` | Command line (`-P`) | `true` to build one zip per instance. Otherwise, one zip with one block per instance is built. |
 | `cx.build.custom.env.instances[<env>]` | `gradle.properties` | Comma-separated list of virtual instance web IDs for `<env>`. Use `default` for the default virtual instance. |
 
-The environment name is free text (`cluster1-dev`, `cluster2-prod`, ...).
+Use the Liferay Workspace environment names (`dev`, `uat`, `prod`, ...), the same as the `configs/<env>` folders, so the generated OSGi configuration lands where `liferay.workspace.environment` expects it.
 
-No `build.gradle` is needed in the CX projects. The root `build.gradle` applies the plugin to every project under `client-extensions/`, at any depth, that has a `client-extension.yaml`.
+No `build.gradle` is needed in the CX projects. The root `build.gradle` applies the plugins to every project under `client-extensions/`, at any depth, that has a `client-extension.yaml`.
 
 Without `-Pcx.custom.deploy.env`, the build behaves exactly like a standard Liferay Workspace.
 
@@ -69,19 +72,19 @@ Without `-Pcx.custom.deploy.env`, the build behaves exactly like a standard Life
 Build every CX for an environment:
 
 ```bash
-./gradlew build -Pcx.custom.deploy.env=sample
+./gradlew build -Pcx.custom.deploy.env=dev
 ```
 
 Deploy to the bundle configured in `liferay.workspace.home.dir`:
 
 ```bash
-./gradlew deploy -Pcx.custom.deploy.env=sample-other
+./gradlew deploy -Pcx.custom.deploy.env=uat
 ```
 
 Build a single CX:
 
 ```bash
-./gradlew :client-extensions:liferay-sample-global-js-1:build -Pcx.custom.deploy.env=sample
+./gradlew :client-extensions:liferay-sample-global-js-1:build -Pcx.custom.deploy.env=dev
 ```
 
 You can also apply the plugin explicitly in a CX `build.gradle`:
@@ -135,19 +138,19 @@ The effective yaml is written to `build/cx-multi-instance/client-extension.<env>
 Build every CX, one zip per instance:
 
 ```bash
-./gradlew build -Pcx.custom.deploy.env=sample -Pcx.custom.one-per-instance=true
+./gradlew build -Pcx.custom.deploy.env=dev -Pcx.custom.one-per-instance=true
 ```
 
 Deploy all the zips to the bundle configured in `liferay.workspace.home.dir`:
 
 ```bash
-./gradlew deploy -Pcx.custom.deploy.env=sample -Pcx.custom.one-per-instance=true
+./gradlew deploy -Pcx.custom.deploy.env=dev -Pcx.custom.one-per-instance=true
 ```
 
 Build a single CX:
 
 ```bash
-./gradlew :client-extensions:liferay-sample-global-js-1:build -Pcx.custom.deploy.env=sample -Pcx.custom.one-per-instance=true
+./gradlew :client-extensions:liferay-sample-global-js-1:build -Pcx.custom.deploy.env=dev -Pcx.custom.one-per-instance=true
 ```
 
 ### How it works
@@ -161,7 +164,7 @@ Build a single CX:
 - Supported tasks: `assemble`, `build`, `buildClientExtensionZip` and `deploy`.
 - Your other `-P` properties and `--offline` are passed to each run. The `cx.custom.*` properties are not, so the runs do not loop.
 
-For example, with `cx.build.custom.env.instances[sample]=default,localhost2,localhost3`, `dist/` contains:
+For example, with `cx.build.custom.env.instances[dev]=default,localhost2,localhost3`, `dist/` contains:
 
 ```
 liferay-sample-global-js-1.zip              (default instance)
@@ -182,6 +185,80 @@ Each zip is a separate bundle with its own web context (`/o/<project>_<webId>/`)
 - **Build time:** every instance is a full Gradle run. From the workspace root, the number of runs is CX × instances.
 - **`dist/` keeps old zips:** zips for instances removed from the list, or from other environments, are not deleted. Clean `dist/` when switching environments.
 - **Static resources are duplicated:** each instance loads its own copy (`/o/<project>_<webId>/`).
+
+## OSGi configuration files (PoC)
+
+> [!NOTE]
+> Proof of concept. Only `customElement` client extensions are supported. File generation is tested and the files are checked with the Apache Felix configuration parser; registration in a running DXP has not been validated yet.
+
+Implements option 2 of [How to set up client extension to be used in multiple On-Premise instances](https://learn.liferay.com/kb-article/how-to-set-up-client-extension-to-be-used-in-multiple-on-premise-instances), as described in [Front-end client extension: how to automate deployments for remote apps in on-premises](https://liferay.dev/es/b/-front-end-client-extension-how-to-automate-deployments-for-remote-apps-in-on-premises). The standard zip is deployed once, and one OSGi configuration file per instance registers the client extension in that instance, pointing to the same static resources.
+
+### Usage
+
+Generate the configuration for every CX:
+
+```bash
+./gradlew generateCXConfig -Pcx.custom.deploy.env=dev
+```
+
+Generate it for a single CX:
+
+```bash
+./gradlew :client-extensions:liferay-sample-custom-element-1:generateCXConfig -Pcx.custom.deploy.env=dev
+```
+
+Then deploy:
+
+1. The standard zip, without `cx.custom.deploy.env` (`./gradlew deploy`). It publishes the static resources and registers the client extension in the default instance.
+2. The generated files, for example with `./gradlew initBundle -Pliferay.workspace.environment=dev`, or by copying `configs/dev/osgi/configs/*.config` to `osgi/configs` in the bundle.
+
+### What it generates
+
+For each `customElement` block and each web ID other than `default`, one file in `configs/<env>/osgi/configs/`:
+
+```
+com.liferay.client.extension.type.configuration.CETConfiguration~liferay-sample-custom-element-1--localhost2.config
+```
+
+```properties
+baseURL="${portalURL}/o/liferay-sample-custom-element-1"
+dxp.lxc.liferay.com.virtualInstanceId="localhost2"
+name="Liferay Sample Custom Element 1"
+type="customElement"
+typeSettings=[ \
+  "friendlyURLMapping\=vanilla-counter", \
+  "instanceable\=false", \
+  "urls\=index.58829bb7a75441944031f8527403cf45456d7360.js", \
+  "useESM\=false", \
+  "htmlElementName\=vanilla-counter", \
+  "cssURLs\=style.29ce553a40c0647dcaaa1b4e07c42ba2032a9d51.css", \
+  "portletCategoryName\=category.client-extensions" \
+]
+```
+
+### How it works
+
+- `generateCXConfig` runs `createClientExtensionConfig` and reads the JSON that Liferay Workspace generates for the zip, with wildcards already resolved (`index.<hash>.js`) and the same `baseURL`.
+- The CX type is detected from the `type` field, and the template `cx-config-templates/<type>.config` is used. Every `@key@` placeholder is replaced with the value of that key, from the block or its `typeSettings`. `@virtualInstanceId@` is the target web ID.
+- Values are escaped for the Apache Felix configuration format. The `=` inside quoted values must be escaped (`\=`): otherwise the parser silently stops reading the file and drops the remaining properties.
+
+### Rules
+
+- **`default` is skipped:** the standard zip already registers the client extension in the default instance.
+- **Unsupported types are skipped** with a warning that names the template to add.
+- **Stale files are removed:** before generating, the previous `.config` files of that CX in `configs/<env>/osgi/configs/` are deleted, so instances removed from the list disappear.
+- **The build plugins are not applied** when `generateCXConfig` is requested, so the JSON it reads is the standard one.
+
+### Adding a CX type
+
+Add `buildSrc/src/main/resources/cx-config-templates/<type>.config` with the properties of that type and `@key@` placeholders. Keys are taken from the block (`name`, `baseURL`, ...) and from its `typeSettings`. Escape the `=` after each `typeSettings` key (`"url\=@url@"`).
+
+### Limitations
+
+- **Tied to a build:** the files contain the hashed file names of the zip they were generated with. Regenerate and deploy them together with every new zip.
+- **External reference code:** each instance gets a different code (`LXC:<id>--<webId>`).
+- **Browser cache:** as the KB article warns, cached files may not refresh automatically with this approach.
+- **Default instance:** the standard zip always registers the client extension in the default instance, even if `default` is not in the list.
 
 ## Common limitations
 

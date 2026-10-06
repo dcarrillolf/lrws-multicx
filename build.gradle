@@ -1,21 +1,33 @@
-if (findProperty("cx.custom.deploy.env")) {
-	File clientExtensionsDir = file("client-extensions")
+File clientExtensionsDir = file("client-extensions")
 
-	boolean onePerInstance = String.valueOf(findProperty("cx.custom.one-per-instance")) == "true"
+boolean deployEnvSet = findProperty("cx.custom.deploy.env") as boolean
 
-	String pluginId = onePerInstance ? "com.liferay.custom.cxperinstance" : "com.liferay.custom.cxmultiinstance"
+boolean generateCXConfigRequested = gradle.startParameter.taskNames.any {
+	it == "generateCXConfig" || it.endsWith(":generateCXConfig")
+}
 
-	subprojects { Project subproject ->
-		if (!subproject.projectDir.toPath().startsWith(clientExtensionsDir.toPath()) ||
-			!subproject.file("client-extension.yaml").exists()) {
+boolean onePerInstance = String.valueOf(findProperty("cx.custom.one-per-instance")) == "true"
 
+subprojects { Project subproject ->
+	if (!subproject.projectDir.toPath().startsWith(clientExtensionsDir.toPath()) ||
+		!subproject.file("client-extension.yaml").exists()) {
+
+		return
+	}
+
+	subproject.afterEvaluate {
+		if (!subproject.pluginManager.hasPlugin("com.liferay.custom.cxconfig")) {
+			subproject.pluginManager.apply("com.liferay.custom.cxconfig")
+		}
+
+		if (!deployEnvSet || generateCXConfigRequested) {
 			return
 		}
 
-		subproject.afterEvaluate {
-			if (!subproject.pluginManager.hasPlugin(pluginId)) {
-				subproject.pluginManager.apply(pluginId)
-			}
+		String pluginId = onePerInstance ? "com.liferay.custom.cxperinstance" : "com.liferay.custom.cxmultiinstance"
+
+		if (!subproject.pluginManager.hasPlugin(pluginId)) {
+			subproject.pluginManager.apply(pluginId)
 		}
 	}
 }

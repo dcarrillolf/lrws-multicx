@@ -1,0 +1,126 @@
+import groovy.json.JsonSlurper
+
+if (!tasks.names.contains("createClientExtensionConfig")) {
+	throw new GradleException("Plugin com.liferay.custom.cxconfig requires a client extension project: " + path)
+}
+
+String cetConfigurationPidPrefix = "com.liferay.client.extension.type.configuration.CETConfiguration~"
+
+def escapeConfigValue = { String value ->
+	value.replace("\\", "\\\\").replace("\"", "\\\"").replace("=", "\\=").replace("\r", "\\r").replace("\n", "\\n").replace("\t", "\\t")
+}
+
+tasks.register("generateCXConfig") {
+	group = "liferay"
+	description = "Generates the OSGi configuration files that register this client extension in the instances of an environment."
+
+	dependsOn "createClientExtensionConfig"
+
+	outputs.upToDateWhen { false }
+
+	doLast {
+		String envName = String.valueOf(findProperty("cx.custom.deploy.env") ?: "").trim()
+
+		if (!envName) {
+			throw new GradleException("Set the environment with -Pcx.custom.deploy.env=<env>")
+		}
+
+		def instancesValue = findProperty("cx.build.custom.env.instances[" + envName + "]")
+
+		if (instancesValue == null) {
+			throw new GradleException(
+				"No instances defined for cx.custom.deploy.env=" + envName + ". Add cx.build.custom.env.instances[" +
+					envName + "]=... to gradle.properties")
+		}
+
+		List<String> webIds = String.valueOf(instancesValue).split(",").collect { it.trim() }.findAll { it }.unique()
+
+		List<String> targetWebIds = webIds - ["default"]
+
+		File clientExtensionConfigFile = file(
+			"build/liferay-client-extension-build/" + project.name + ".client-extension-config.json")
+
+		if (!clientExtensionConfigFile.exists()) {
+			throw new GradleException("Unable to find " + clientExtensionConfigFile)
+		}
+
+		File outputDir = rootProject.file("configs/" + envName + "/osgi/configs")
+
+		outputDir.mkdirs()
+
+		Map<String, Map> configurations = new JsonSlurper().parse(clientExtensionConfigFile)
+
+		configurations.each { String pid, Map properties ->
+			if (!pid.startsWith(cetConfigurationPidPrefix)) {
+				return
+			}
+
+			String id = pid.substring(cetConfigurationPidPrefix.length())
+
+			if (id.contains("/") || id.contains("--")) {
+				logger.lifecycle("[cxconfig] Skipping {}: it is already bound to a virtual instance", id)
+
+				return
+			}
+
+			String type = properties.type
+
+			URL templateURL = getClass().getClassLoader().getResource("cx-config-templates/" + type + ".config")
+
+			if (templateURL == null) {
+				logger.warn(
+					"[cxconfig] Skipping {}: type {} is not supported yet. Add buildSrc/src/main/resources/" +
+						"cx-config-templates/{}.config to support it",
+					id, type, type)
+
+				return
+			}
+
+			String template = templateURL.getText("UTF-8")
+
+			if (webIds.contains("default")) {
+				logger.lifecycle("[cxconfig] Skipping {} (default): the client extension zip registers it in the default instance", id)
+			}
+
+			Map<String, String> values = [:]
+
+			properties.each { key, value ->
+				if (!(value instanceof Collection) && !(value instanceof Map)) {
+					values[String.valueOf(key)] = String.valueOf(value)
+				}
+			}
+
+			(properties.typeSettings ?: []).each { String typeSetting ->
+				int index = typeSetting.indexOf("=")
+
+				if (index > 0) {
+					values[typeSetting.substring(0, index)] = typeSetting.substring(index + 1)
+				}
+			}
+
+			String filePrefix = cetConfigurationPidPrefix + id + "--"
+
+			outputDir.listFiles().findAll { it.name.startsWith(filePrefix) && it.name.endsWith(".config") }.each {
+				it.delete()
+			}
+
+			targetWebIds.each { String webId ->
+				values["virtualInstanceId"] = webId
+
+				String content = template.replaceAll(/@([A-Za-z0-9_.]+)@/) { String placeholder, String key ->
+					if (!values.containsKey(key)) {
+						logger.warn("[cxconfig] {} has no value for {} in {}", id, key, type + ".config")
+					}
+
+					escapeConfigValue(values.get(key, ""))
+				}
+
+				File configFile = new File(outputDir, filePrefix + webId.replace(".", "-") + ".config")
+
+				configFile.setText(content, "UTF-8")
+
+				logger.lifecycle("[cxconfig] {} ({}) -> {}", id, webId, rootProject.relativePath(configFile))
+			}
+		}
+	}
+}

@@ -1,6 +1,4 @@
-def createClientExtensionConfigTask = tasks.findByName("createClientExtensionConfig")
-
-if (createClientExtensionConfigTask == null) {
+if (!tasks.names.contains("createClientExtensionConfig")) {
 	throw new GradleException(
 		"Plugin com.liferay.custom.cxmultiinstance requires a client extension project: " + path)
 }
@@ -37,58 +35,58 @@ if (gradleVirtualInstanceId && extraWebIds) {
 			envName)
 }
 
-ClassLoader classLoader = createClientExtensionConfigTask.getClass().getClassLoader()
-
-Class clientExtensionClass = classLoader.loadClass(
-	"com.liferay.gradle.plugins.workspace.internal.client.extension.ClientExtension")
-
-def yamlObjectMapper = classLoader.loadClass(
-	"com.fasterxml.jackson.databind.ObjectMapper"
-).getConstructor(
-	classLoader.loadClass("com.fasterxml.jackson.core.JsonFactory")
-).newInstance(
-	classLoader.loadClass("com.fasterxml.jackson.dataformat.yaml.YAMLFactory").getConstructor().newInstance()
-)
-
-def rootJsonNode = yamlObjectMapper.readTree(file("client-extension.yaml"))
-
-def effectiveJsonNode = rootJsonNode.deepCopy()
-
-List<Map<String, Object>> copies = []
-
-List<String> replicatedIds = []
-
-rootJsonNode.fields().each { entry ->
-	if (entry.key in ["assemble", "runtime"]) {
-		return
-	}
-
-	if (entry.value.has(virtualInstanceIdKey)) {
-		logger.warn("[cxmultiinstance] Skipping {} because it already sets {}", entry.key, virtualInstanceIdKey)
-
-		return
-	}
-
-	replicatedIds << entry.key
-
-	if (!includeDefault) {
-		effectiveJsonNode.remove(entry.key)
-	}
-
-	extraWebIds.each { String webId ->
-		String id = entry.key + "--" + webId.replace(".", "-")
-
-		def copyJsonNode = entry.value.deepCopy()
-
-		copies << [id: id, jsonNode: copyJsonNode, type: entry.key, webId: webId]
-
-		effectiveJsonNode.set(id, copyJsonNode.deepCopy().put(virtualInstanceIdKey, webId))
-	}
-}
-
-File effectiveYamlFile = file("build/cx-multi-instance/client-extension." + envName + ".yaml")
-
 tasks.named("createClientExtensionConfig") {
+	ClassLoader classLoader = delegate.getClass().getClassLoader()
+
+	Class clientExtensionClass = classLoader.loadClass(
+		"com.liferay.gradle.plugins.workspace.internal.client.extension.ClientExtension")
+
+	def yamlObjectMapper = classLoader.loadClass(
+		"com.fasterxml.jackson.databind.ObjectMapper"
+	).getConstructor(
+		classLoader.loadClass("com.fasterxml.jackson.core.JsonFactory")
+	).newInstance(
+		classLoader.loadClass("com.fasterxml.jackson.dataformat.yaml.YAMLFactory").getConstructor().newInstance()
+	)
+
+	def rootJsonNode = yamlObjectMapper.readTree(file("client-extension.yaml"))
+
+	def effectiveJsonNode = rootJsonNode.deepCopy()
+
+	List<Map<String, Object>> copies = []
+
+	List<String> replicatedIds = []
+
+	rootJsonNode.fields().each { entry ->
+		if (entry.key in ["assemble", "runtime"]) {
+			return
+		}
+
+		if (entry.value.has(virtualInstanceIdKey)) {
+			logger.warn("[cxmultiinstance] Skipping {} because it already sets {}", entry.key, virtualInstanceIdKey)
+
+			return
+		}
+
+		replicatedIds << entry.key
+
+		if (!includeDefault) {
+			effectiveJsonNode.remove(entry.key)
+		}
+
+		extraWebIds.each { String webId ->
+			String id = entry.key + "--" + webId.replace(".", "-")
+
+			def copyJsonNode = entry.value.deepCopy()
+
+			copies << [id: id, jsonNode: copyJsonNode, type: entry.key, webId: webId]
+
+			effectiveJsonNode.set(id, copyJsonNode.deepCopy().put(virtualInstanceIdKey, webId))
+		}
+	}
+
+	File effectiveYamlFile = file("build/cx-multi-instance/client-extension." + envName + ".yaml")
+
 	inputs.property "cxMultiInstanceEnv", envName
 	inputs.property "cxMultiInstanceWebIds", webIds.join(",")
 

@@ -1,6 +1,10 @@
 if (findProperty("cx.custom.deploy.env")) {
 	File clientExtensionsDir = file("client-extensions")
 
+	boolean onePerInstance = String.valueOf(findProperty("cx.custom.one-per-instance")) == "true"
+
+	String pluginId = onePerInstance ? "com.liferay.custom.cxperinstance" : "com.liferay.custom.cxmultiinstance"
+
 	subprojects { Project subproject ->
 		if (!subproject.projectDir.toPath().startsWith(clientExtensionsDir.toPath()) ||
 			!subproject.file("client-extension.yaml").exists()) {
@@ -9,8 +13,8 @@ if (findProperty("cx.custom.deploy.env")) {
 		}
 
 		subproject.afterEvaluate {
-			if (!subproject.pluginManager.hasPlugin("com.liferay.custom.cxmultiinstance")) {
-				subproject.pluginManager.apply("com.liferay.custom.cxmultiinstance")
+			if (!subproject.pluginManager.hasPlugin(pluginId)) {
+				subproject.pluginManager.apply(pluginId)
 			}
 		}
 	}

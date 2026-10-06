@@ -1,0 +1,105 @@
+if (!tasks.names.contains("createClientExtensionConfig")) {
+	throw new GradleException("Plugin com.liferay.custom.cxperinstance requires a client extension project: " + path)
+}
+
+String envName = String.valueOf(findProperty("cx.custom.deploy.env") ?: "").trim()
+
+if (!envName) {
+	throw new GradleException("cx.custom.one-per-instance requires -Pcx.custom.deploy.env=<env>")
+}
+
+def instancesValue = findProperty("cx.build.custom.env.instances[" + envName + "]")
+
+if (instancesValue == null) {
+	throw new GradleException(
+		"No instances defined for cx.custom.deploy.env=" + envName + ". Add cx.build.custom.env.instances[" + envName +
+			"]=... to gradle.properties")
+}
+
+if (gradle.liferayWorkspace.virtualInstanceId) {
+	throw new GradleException(
+		"liferay.virtual.instance.id=" + gradle.liferayWorkspace.virtualInstanceId +
+			" is not compatible with cx.custom.one-per-instance")
+}
+
+List<String> webIds = String.valueOf(instancesValue).split(",").collect { it.trim() }.findAll { it }.unique()
+
+boolean includeDefault = webIds.contains("default")
+
+List<String> extraWebIds = webIds - ["default"]
+
+List<String> supportedTaskNames = ["assemble", "build", "buildClientExtensionZip", "deploy"]
+
+List<String> requestedTaskNames = gradle.startParameter.taskNames.collect {
+	it.tokenize(":").last()
+}.findAll {
+	it in supportedTaskNames
+}.unique()
+
+if (requestedTaskNames.isEmpty()) {
+	return
+}
+
+if (!includeDefault) {
+	["buildClientExtensionZip", "deploy"].each { String taskName ->
+		if (tasks.names.contains(taskName)) {
+			tasks.named(taskName) {
+				enabled = false
+			}
+		}
+	}
+}
+
+Map<String, String> nestedProjectProperties = gradle.startParameter.projectProperties.findAll { key, value ->
+	!key.startsWith("cx.custom.")
+}
+
+String projectPath = project.path
+File workspaceDir = project.rootDir
+File defaultZipFile = file("dist/" + project.name + ".zip")
+boolean offline = gradle.startParameter.offline
+boolean windows = System.getProperty("os.name").toLowerCase().contains("windows")
+
+def perInstanceTask = tasks.register("cxPerInstance") {
+	group = "liferay"
+	description = "Runs " + requestedTaskNames + " once per virtual instance of " + envName + "."
+
+	doLast {
+		if (!includeDefault && defaultZipFile.exists()) {
+			logger.lifecycle(
+				"[cxperinstance] Removing {} because \"default\" is not in the instance list",
+				project.relativePath(defaultZipFile))
+
+			defaultZipFile.delete()
+		}
+
+		extraWebIds.each { String webId ->
+			logger.lifecycle("[cxperinstance] {} {} -> {}", projectPath, requestedTaskNames, webId)
+
+			List<String> command = [new File(workspaceDir, windows ? "gradlew.bat" : "gradlew").absolutePath]
+
+			command.addAll(requestedTaskNames.collect { projectPath + ":" + it })
+
+			nestedProjectProperties.each { key, value ->
+				command << "-P" + key + "=" + value
+			}
+
+			command << "-Pliferay.virtual.instance.id=" + webId
+
+			if (offline) {
+				command << "--offline"
+			}
+
+			project.exec {
+				workingDir = workspaceDir
+				commandLine = command
+			}
+		}
+	}
+}
+
+requestedTaskNames.each { String taskName ->
+	tasks.named(taskName) {
+		finalizedBy perInstanceTask
+	}
+}

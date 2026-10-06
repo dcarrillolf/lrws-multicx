@@ -1,0 +1,140 @@
+def createClientExtensionConfigTask = tasks.findByName("createClientExtensionConfig")
+
+if (createClientExtensionConfigTask == null) {
+	throw new GradleException(
+		"Plugin com.liferay.custom.cxmultiinstance requires a client extension project: " + path)
+}
+
+String virtualInstanceIdKey = "dxp.lxc.liferay.com.virtualInstanceId"
+
+def envProperty = findProperty("cx.custom.deploy.env")
+
+if (!envProperty) {
+	return
+}
+
+String envName = String.valueOf(envProperty).trim()
+
+def instancesValue = findProperty("cx.build.custom.env.instances[" + envName + "]")
+
+if (instancesValue == null) {
+	throw new GradleException(
+		"No instances defined for cx.custom.deploy.env=" + envName + ". Add cx.build.custom.env.instances[" + envName +
+			"]=... to gradle.properties")
+}
+
+List<String> webIds = String.valueOf(instancesValue).split(",").collect { it.trim() }.findAll { it }.unique()
+
+boolean includeDefault = webIds.contains("default")
+
+List<String> extraWebIds = webIds - ["default"]
+
+def gradleVirtualInstanceId = gradle.liferayWorkspace.virtualInstanceId
+
+if (gradleVirtualInstanceId && extraWebIds) {
+	throw new GradleException(
+		"liferay.virtual.instance.id=" + gradleVirtualInstanceId + " is not compatible with cx.custom.deploy.env=" +
+			envName)
+}
+
+ClassLoader classLoader = createClientExtensionConfigTask.getClass().getClassLoader()
+
+Class clientExtensionClass = classLoader.loadClass(
+	"com.liferay.gradle.plugins.workspace.internal.client.extension.ClientExtension")
+
+def yamlObjectMapper = classLoader.loadClass(
+	"com.fasterxml.jackson.databind.ObjectMapper"
+).getConstructor(
+	classLoader.loadClass("com.fasterxml.jackson.core.JsonFactory")
+).newInstance(
+	classLoader.loadClass("com.fasterxml.jackson.dataformat.yaml.YAMLFactory").getConstructor().newInstance()
+)
+
+def rootJsonNode = yamlObjectMapper.readTree(file("client-extension.yaml"))
+
+def effectiveJsonNode = rootJsonNode.deepCopy()
+
+List<Map<String, Object>> copies = []
+
+List<String> replicatedIds = []
+
+rootJsonNode.fields().each { entry ->
+	if (entry.key in ["assemble", "runtime"]) {
+		return
+	}
+
+	if (entry.value.has(virtualInstanceIdKey)) {
+		logger.warn("[cxmultiinstance] Skipping {} because it already sets {}", entry.key, virtualInstanceIdKey)
+
+		return
+	}
+
+	replicatedIds << entry.key
+
+	if (!includeDefault) {
+		effectiveJsonNode.remove(entry.key)
+	}
+
+	extraWebIds.each { String webId ->
+		String id = entry.key + "--" + webId.replace(".", "-")
+
+		def copyJsonNode = entry.value.deepCopy()
+
+		copies << [id: id, jsonNode: copyJsonNode, type: entry.key, webId: webId]
+
+		effectiveJsonNode.set(id, copyJsonNode.deepCopy().put(virtualInstanceIdKey, webId))
+	}
+}
+
+File effectiveYamlFile = file("build/cx-multi-instance/client-extension." + envName + ".yaml")
+
+tasks.named("createClientExtensionConfig") {
+	inputs.property "cxMultiInstanceEnv", envName
+	inputs.property "cxMultiInstanceWebIds", webIds.join(",")
+
+	outputs.file effectiveYamlFile
+
+	if (!includeDefault) {
+		Class taskClass = delegate.getClass()
+
+		while ((taskClass != null) && !taskClass.declaredFields.any { it.name == "_clientExtensions" }) {
+			taskClass = taskClass.superclass
+		}
+
+		if (taskClass == null) {
+			throw new GradleException(
+				"Unable to exclude the default instance: unsupported Liferay Workspace plugin version")
+		}
+
+		def clientExtensionsField = taskClass.getDeclaredField("_clientExtensions")
+
+		clientExtensionsField.accessible = true
+
+		clientExtensionsField.get(delegate).removeIf { it.id in replicatedIds }
+	}
+
+	copies.each { Map<String, Object> copy ->
+		def clientExtension = yamlObjectMapper.treeToValue(copy.jsonNode, clientExtensionClass)
+
+		clientExtension.id = copy.id
+		clientExtension.projectId = project.name.replaceAll("[^a-zA-Z0-9]", "").toLowerCase()
+		clientExtension.projectName = project.name
+
+		if (!clientExtension.type) {
+			clientExtension.type = copy.type
+		}
+
+		clientExtension.virtualInstanceId = copy.webId
+
+		addClientExtension(clientExtension)
+	}
+
+	doFirst {
+		effectiveYamlFile.parentFile.mkdirs()
+
+		yamlObjectMapper.writeValue(effectiveYamlFile, effectiveJsonNode)
+
+		logger.lifecycle(
+			"[cxmultiinstance] cx.custom.deploy.env={} instances={} -> {}", envName, webIds, effectiveYamlFile)
+	}
+}

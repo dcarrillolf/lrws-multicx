@@ -1,1 +1,17 @@
-// Check GETTING_STARTED.md for information regarding usage.
+if (findProperty("cx.custom.deploy.env")) {
+	File clientExtensionsDir = file("client-extensions")
+
+	subprojects { Project subproject ->
+		if (!subproject.projectDir.toPath().startsWith(clientExtensionsDir.toPath()) ||
+			!subproject.file("client-extension.yaml").exists()) {
+
+			return
+		}
+
+		subproject.afterEvaluate {
+			if (!subproject.pluginManager.hasPlugin("com.liferay.custom.cxmultiinstance")) {
+				subproject.pluginManager.apply("com.liferay.custom.cxmultiinstance")
+			}
+		}
+	}
+}

@@ -1,9 +1,9 @@
-# lrws-multicx
+# Liferay Workspace Multi-Instance Client Extensions Builds
 
+> [!WARNING] 
 > This customization relies on the `dxp.lxc.liferay.com.virtualInstanceId` property, which is **deprecated**. See [Working with Client Extensions → Configuring Client Extensions](https://learn.liferay.com/w/dxp/development/client-extensions/working-with-client-extensions). It still works in DXP 2026.Q1, but it may be removed in a future release.
 
 Liferay Workspace customization that builds a single Client Extension (CX) zip targeting several virtual instances, driven by a per-environment configuration.
-
 > This is not an official Liferay product. It relies on internal classes of the Liferay Workspace Gradle plugin and on the deprecated `dxp.lxc.liferay.com.virtualInstanceId` property. Review it before using it in your own projects.
 
 ## Why

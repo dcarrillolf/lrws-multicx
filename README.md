@@ -41,14 +41,17 @@ See also:
 | `buildSrc/src/main/groovy/com.liferay.custom.cxperinstance.gradle` | The `com.liferay.custom.cxperinstance` plugin (one zip per instance). |
 | `buildSrc/src/main/groovy/com.liferay.custom.cxconfig.gradle` | The `com.liferay.custom.cxconfig` plugin (`generateCXConfig` task, PoC). |
 | `buildSrc/src/main/resources/cx-config-templates/` | One `.config` template per CX type for `generateCXConfig`. Only `customElement.config` for now. |
-| `build.gradle` | Applies the plugins to every project under `client-extensions/`. `cxconfig` is always applied; the build plugins only when `cx.custom.deploy.env` is set. |
-| `gradle.properties` | Example instance lists per environment. |
+| `buildSrc/src/main/groovy/com.liferay.custom.cxinstances.gradle` | The `com.liferay.custom.cxinstances` plugin (`retrieveCXInstances` task). |
+| `buildSrc/src/main/groovy/com/liferay/custom/PortalInstancesUtil.groovy` | Reads the web IDs of an installation through the `headless-portal-instances` API. |
+| `build.gradle` | Applies `cxinstances` to the root project and the plugins to every project under `client-extensions/`. `cxconfig` is always applied; the build plugins only when `cx.custom.deploy.env` is set. |
+| `gradle.properties` | Example portal URL and instance lists per environment. |
 
 ## Configuration
 
-Define the instances of each environment in `gradle.properties`:
+Define the instances of each environment in `gradle.properties`, and optionally the URL of its default instance (used by `retrieveCXInstances`):
 
 ```properties
+cx.build.custom.env.url[dev]=http://localhost:8080
 cx.build.custom.env.instances[dev]=default,localhost2,localhost3
 cx.build.custom.env.instances[uat]=localhost2,localhost3
 ```
@@ -58,6 +61,8 @@ cx.build.custom.env.instances[uat]=localhost2,localhost3
 | `cx.custom.deploy.env` | Command line (`-P`) | Environment to build or generate the configuration for. If not set, every CX is built from its `client-extension.yaml` as is. |
 | `cx.custom.one-per-instance` | Command line (`-P`) | `true` to build one zip per instance. Otherwise, one zip with one block per instance is built. |
 | `cx.build.custom.env.instances[<env>]` | `gradle.properties` | Comma-separated list of virtual instance web IDs for `<env>`. Use `default` for the default virtual instance. |
+| `cx.build.custom.env.url[<env>]` | `gradle.properties` | URL of the default instance of `<env>`. Only needed for `retrieveCXInstances`. |
+| `cx.custom.instances.apply` | Command line (`-P`) | `true` to let `retrieveCXInstances` write the list to `gradle.properties`. Otherwise it only shows it. |
 
 Use the Liferay Workspace environment names (`dev`, `uat`, `prod`, ...), the same as the `configs/<env>` folders, so the generated OSGi configuration lands where `liferay.workspace.environment` expects it.
 
@@ -189,7 +194,7 @@ Each zip is a separate bundle with its own web context (`/o/<project>_<webId>/`)
 ## OSGi configuration files (PoC)
 
 > [!NOTE]
-> Proof of concept. Only `customElement` client extensions are supported. File generation is tested and the files are checked with the Apache Felix configuration parser; registration in a running DXP has not been validated yet.
+> Proof of concept. Only `customElement` client extensions are supported.
 
 Implements option 2 of [How to set up client extension to be used in multiple On-Premise instances](https://learn.liferay.com/kb-article/how-to-set-up-client-extension-to-be-used-in-multiple-on-premise-instances), as described in [Front-end client extension: how to automate deployments for remote apps in on-premises](https://liferay.dev/es/b/-front-end-client-extension-how-to-automate-deployments-for-remote-apps-in-on-premises). The standard zip is deployed once, and one OSGi configuration file per instance registers the client extension in that instance, pointing to the same static resources.
 
@@ -259,6 +264,50 @@ Add `buildSrc/src/main/resources/cx-config-templates/<type>.config` with the pro
 - **External reference code:** each instance gets a different code (`LXC:<id>--<webId>`).
 - **Browser cache:** as the KB article warns, cached files may not refresh automatically with this approach.
 - **Default instance:** the standard zip always registers the client extension in the default instance, even if `default` is not in the list.
+
+## Updating the instance lists from the portal
+
+`retrieveCXInstances` reads the virtual instances of an environment through the `headless-portal-instances` API of its default instance, and shows or updates `cx.build.custom.env.instances[<env>]`. It runs on its own, at any time, and does not build anything.
+
+### Requirements
+
+- `cx.build.custom.env.url[<env>]` in `gradle.properties`.
+- An OAuth 2 application of type **Client Credentials** in the **default instance** of that installation, with a client credentials user that is an administrator of the default instance and the read scope of `Liferay.Headless.Portal.Instances`. The API only answers in the default instance.
+- Its credentials in the `LIFERAY_OAUTH2_CLIENT_ID` and `LIFERAY_OAUTH2_CLIENT_SECRET` environment variables, so they never end up in `gradle.properties` or in the command history.
+
+### Usage
+
+```bash
+export LIFERAY_OAUTH2_CLIENT_ID=<client-id> LIFERAY_OAUTH2_CLIENT_SECRET=<client-secret>
+or
+LIFERAY_OAUTH2_CLIENT_ID=<client-id> LIFERAY_OAUTH2_CLIENT_SECRET=<client-secret> ./gradlew retrieveCXInstances ...
+```
+
+Show the instances of the portal next to the current value:
+
+```bash
+./gradlew retrieveCXInstances -Pcx.custom.deploy.env=dev
+```
+
+```
+[cxinstances] http://localhost:8080
+[cxinstances] Current: cx.build.custom.env.instances[dev]=default,localhost2
+[cxinstances] Portal:  cx.build.custom.env.instances[dev]=default,localhost2,localhost3
+[cxinstances] Run with -Pcx.custom.instances.apply=true to update gradle.properties
+```
+
+Update `gradle.properties` automatically:
+
+```bash
+./gradlew retrieveCXInstances -Pcx.custom.deploy.env=dev -Pcx.custom.instances.apply=true
+```
+
+### Rules
+
+- **`default`:** the list always starts with `default`, unless the current value does not include it. In that case it is kept out, because deploying to the default instance is your decision, not something the portal can tell.
+- **Only one line changes:** `cx.build.custom.env.instances[<env>]` is replaced. If it does not exist, it is added after `cx.build.custom.env.url[<env>]`, or at the end of the file.
+- **No changes, no write:** if the list already matches, the file is not touched.
+- **The build plugins are not applied** when `retrieveCXInstances` is requested, so it also works for an environment without an instance list yet.
 
 ## Common limitations
 

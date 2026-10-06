@@ -1,0 +1,94 @@
+import com.liferay.custom.PortalInstancesUtil
+
+import java.util.regex.Pattern
+
+tasks.register("retrieveCXInstances") {
+	group = "liferay"
+	description = "Reads the virtual instances of an environment and shows or updates cx.build.custom.env.instances[<env>]."
+
+	outputs.upToDateWhen { false }
+
+	doLast {
+		String envName = String.valueOf(findProperty("cx.custom.deploy.env") ?: "").trim()
+
+		if (!envName) {
+			throw new GradleException("Set the environment with -Pcx.custom.deploy.env=<env>")
+		}
+
+		String urlKey = "cx.build.custom.env.url[" + envName + "]"
+		String instancesKey = "cx.build.custom.env.instances[" + envName + "]"
+
+		String portalURL = String.valueOf(findProperty(urlKey) ?: "").trim()
+
+		if (!portalURL) {
+			throw new GradleException("Add " + urlKey + "=<url of the default instance> to gradle.properties")
+		}
+
+		String clientId = System.getenv("LIFERAY_OAUTH2_CLIENT_ID")
+		String clientSecret = System.getenv("LIFERAY_OAUTH2_CLIENT_SECRET")
+
+		if (!clientId || !clientSecret) {
+			throw new GradleException(
+				"Set the LIFERAY_OAUTH2_CLIENT_ID and LIFERAY_OAUTH2_CLIENT_SECRET environment variables (OAuth 2 " +
+					"client credentials application of the default instance)")
+		}
+
+		List<String> webIds = PortalInstancesUtil.getWebIds(portalURL, clientId, clientSecret)
+
+		def currentValue = findProperty(instancesKey)
+
+		if ((currentValue != null) &&
+			!String.valueOf(currentValue).split(",").collect { it.trim() }.contains("default")) {
+
+			webIds = webIds - ["default"]
+
+			logger.lifecycle("[cxinstances] Keeping \"default\" out of the list, as in the current value")
+		}
+
+		String newLine = instancesKey + "=" + webIds.join(",")
+
+		logger.lifecycle("[cxinstances] {}", portalURL)
+		logger.lifecycle("[cxinstances] Current: {}", currentValue == null ? "(not defined)" : instancesKey + "=" + currentValue)
+		logger.lifecycle("[cxinstances] Portal:  {}", newLine)
+
+		if (String.valueOf(findProperty("cx.custom.instances.apply")) != "true") {
+			logger.lifecycle("[cxinstances] Run with -Pcx.custom.instances.apply=true to update gradle.properties")
+
+			return
+		}
+
+		File propertiesFile = rootProject.file("gradle.properties")
+
+		String text = propertiesFile.getText("UTF-8")
+
+		List<String> lines = text.readLines()
+
+		Pattern instancesPattern = Pattern.compile("^\\s*" + Pattern.quote(instancesKey) + "\\s*[=:].*")
+
+		int index = lines.findIndexOf { instancesPattern.matcher(it).matches() }
+
+		if (index >= 0) {
+			if (lines[index].trim() == newLine) {
+				logger.lifecycle("[cxinstances] gradle.properties is already up to date")
+
+				return
+			}
+
+			lines[index] = newLine
+		}
+		else {
+			int urlIndex = lines.findIndexOf { it.trim().startsWith(urlKey) }
+
+			if (urlIndex >= 0) {
+				lines.add(urlIndex + 1, newLine)
+			}
+			else {
+				lines.add(newLine)
+			}
+		}
+
+		propertiesFile.setText(lines.join("\n") + (text.endsWith("\n") ? "\n" : ""), "UTF-8")
+
+		logger.lifecycle("[cxinstances] Updated {}", rootProject.relativePath(propertiesFile))
+	}
+}

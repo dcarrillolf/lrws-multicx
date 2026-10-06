@@ -1,9 +1,11 @@
+apply plugin: "com.liferay.custom.cxinstances"
+
 File clientExtensionsDir = file("client-extensions")
 
 boolean deployEnvSet = findProperty("cx.custom.deploy.env") as boolean
 
-boolean generateCXConfigRequested = gradle.startParameter.taskNames.any {
-	it == "generateCXConfig" || it.endsWith(":generateCXConfig")
+boolean standaloneTaskRequested = gradle.startParameter.taskNames.any { String taskName ->
+	["generateCXConfig", "retrieveCXInstances"].any { taskName == it || taskName.endsWith(":" + it) }
 }
 
 boolean onePerInstance = String.valueOf(findProperty("cx.custom.one-per-instance")) == "true"
@@ -20,7 +22,7 @@ subprojects { Project subproject ->
 			subproject.pluginManager.apply("com.liferay.custom.cxconfig")
 		}
 
-		if (!deployEnvSet || generateCXConfigRequested) {
+		if (!deployEnvSet || standaloneTaskRequested) {
 			return
 		}
 

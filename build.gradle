@@ -10,6 +10,8 @@ boolean standaloneTaskRequested = gradle.startParameter.taskNames.any { String t
 
 boolean onePerInstance = String.valueOf(findProperty("cx.custom.one-per-instance")) == "true"
 
+boolean nestedInstanceRun = findProperty("cx.internal.instance.web.id") != null
+
 subprojects { Project subproject ->
 	if (!subproject.projectDir.toPath().startsWith(clientExtensionsDir.toPath()) ||
 		!subproject.file("client-extension.yaml").exists()) {
@@ -20,6 +22,14 @@ subprojects { Project subproject ->
 	subproject.afterEvaluate {
 		if (!subproject.pluginManager.hasPlugin("com.liferay.custom.cxconfig")) {
 			subproject.pluginManager.apply("com.liferay.custom.cxconfig")
+		}
+
+		if (nestedInstanceRun) {
+			if (!subproject.pluginManager.hasPlugin("com.liferay.custom.cxperinstance")) {
+				subproject.pluginManager.apply("com.liferay.custom.cxperinstance")
+			}
+
+			return
 		}
 
 		if (!deployEnvSet || standaloneTaskRequested) {

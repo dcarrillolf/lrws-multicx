@@ -60,7 +60,7 @@ cx.build.custom.env.instances[uat]=localhost2,localhost3
 |---|---|---|
 | `cx.custom.deploy.env` | Command line (`-P`) | Environment to build or generate the configuration for. If not set, every CX is built from its `client-extension.yaml` as is. |
 | `cx.custom.one-per-instance` | Command line (`-P`) | `true` to build one zip per instance. Otherwise, one zip with one block per instance is built. |
-| `cx.build.custom.env.instances[<env>]` | `gradle.properties` | Comma-separated list of virtual instance web IDs for `<env>`. Use `default` for the default virtual instance. |
+| `cx.build.custom.env.instances[<env>]` | `gradle.properties` | Web IDs of the virtual instances of `<env>`: a comma-separated list, or a JSON array (see [Web IDs](#web-ids)). Use `default` for the default virtual instance. |
 | `cx.build.custom.env.url[<env>]` | `gradle.properties` | URL of the default instance of `<env>`. Only needed for `retrieveCXInstances`. |
 | `cx.custom.instances.apply` | Command line (`-P`) | `true` to let `retrieveCXInstances` write the list to `gradle.properties`. Otherwise it only shows it. |
 
@@ -102,7 +102,7 @@ apply plugin: "com.liferay.custom.cxmultiinstance"
 
 For each CX block in `client-extension.yaml` and each web ID other than `default`, the plugin adds a copy of the block:
 
-- **ID:** `<id>--<webId>`, where every `.` in the web ID becomes `-`.
+- **ID:** `<id>--<webId>`, with the web ID reduced to letters, digits and `-` (see [Web IDs](#web-ids)).
 - **Instance:** the copy sets `dxp.lxc.liferay.com.virtualInstanceId: <webId>`.
 
 For example, with `cx.build.custom.env.instances[env]=default,sample.com`:
@@ -177,7 +177,7 @@ liferay-sample-global-js-1_localhost2.zip   (localhost2)
 liferay-sample-global-js-1_localhost3.zip   (localhost3)
 ```
 
-Each zip is a separate bundle with its own web context (`/o/<project>_<webId>/`), so they can be deployed side by side in `osgi/client-extensions`.
+Each zip is a separate bundle with its own web context (`/o/<project>_<webId>/`), so they can be deployed side by side in `osgi/client-extensions`. If the web ID has characters that a bundle name does not accept, a safe name is used for the zip, the bundle and the web context, and the configuration inside the zip keeps the real web ID (see [Web IDs](#web-ids)).
 
 ### Rules
 
@@ -308,6 +308,36 @@ Update `gradle.properties` automatically:
 - **Only one line changes:** `cx.build.custom.env.instances[<env>]` is replaced. If it does not exist, it is added after `cx.build.custom.env.url[<env>]`, or at the end of the file.
 - **No changes, no write:** if the list already matches, the file is not touched.
 - **The build plugins are not applied** when `retrieveCXInstances` is requested, so it also works for an environment without an instance list yet.
+
+## Web IDs
+
+A web ID can contain almost any character: spaces, accents, dots, commas, quotes...
+
+### Instance lists
+
+Use a comma-separated list when no web ID contains a comma, and a JSON array otherwise:
+
+```properties
+cx.build.custom.env.instances[dev]=default,e2.localhost,Portal 1
+cx.build.custom.env.instances[uat]=["default","Portal, with comma","Portal 1"]
+```
+
+Gradle reads `gradle.properties` as ISO-8859-1, so write non-ASCII characters as `\uXXXX` (`\u00ed` for `í`) and double the backslash of JSON escapes (`\\"` for a quote). `retrieveCXInstances` writes the line in the right format and escaping for you.
+
+### Generated names
+
+The real web ID is always kept in the configuration (`dxp.lxc.liferay.com.virtualInstanceId`). Only the names derived from it are simplified, after removing accents:
+
+| Name | Rule | `Portal 1` | `e2.localhost` |
+|---|---|---|---|
+| CX ID and `.config` file name | Anything other than letters and digits becomes `-` | `Portal-1` | `e2-localhost` |
+| Zip, bundle and web context (one zip per instance) | Anything other than letters, digits, `.`, `_` and `-` becomes `-` | `Portal-1` | `e2.localhost` |
+
+Two web IDs that only differ in those characters produce the same name.
+
+### Characters Liferay cannot handle
+
+When a client extension is deployed from a zip, Liferay builds an OSGi filter with the web ID without escaping `(`, `)`, `*` and `\`. The build fails with a clear message for those web IDs in the two zip modes. The OSGi configuration mode does not have this limitation.
 
 ## Common limitations
 

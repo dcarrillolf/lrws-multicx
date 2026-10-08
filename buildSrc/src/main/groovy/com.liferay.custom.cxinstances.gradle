@@ -1,3 +1,4 @@
+import com.liferay.custom.CXInstancesUtil
 import com.liferay.custom.PortalInstancesUtil
 
 import java.util.regex.Pattern
@@ -38,18 +39,19 @@ tasks.register("retrieveCXInstances") {
 		def currentValue = findProperty(instancesKey)
 
 		if ((currentValue != null) &&
-			!String.valueOf(currentValue).split(",").collect { it.trim() }.contains("default")) {
+			!CXInstancesUtil.parseWebIds(envName, currentValue).contains("default")) {
 
 			webIds = webIds - ["default"]
 
 			logger.lifecycle("[cxinstances] Keeping \"default\" out of the list, as in the current value")
 		}
 
-		String newLine = instancesKey + "=" + webIds.join(",")
+		String newValue = CXInstancesUtil.formatWebIds(webIds)
+		String newLine = instancesKey + "=" + CXInstancesUtil.escapePropertyValue(newValue)
 
 		logger.lifecycle("[cxinstances] {}", portalURL)
 		logger.lifecycle("[cxinstances] Current: {}", currentValue == null ? "(not defined)" : instancesKey + "=" + currentValue)
-		logger.lifecycle("[cxinstances] Portal:  {}", newLine)
+		logger.lifecycle("[cxinstances] Portal:  {}", instancesKey + "=" + newValue)
 
 		if (String.valueOf(findProperty("cx.custom.instances.apply")) != "true") {
 			logger.lifecycle("[cxinstances] Run with -Pcx.custom.instances.apply=true to update gradle.properties")

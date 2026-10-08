@@ -1,5 +1,35 @@
+import com.liferay.custom.CXInstancesUtil
+
+import groovy.json.JsonGenerator
+import groovy.json.JsonSlurper
+
 if (!tasks.names.contains("createClientExtensionConfig")) {
 	throw new GradleException("Plugin com.liferay.custom.cxperinstance requires a client extension project: " + path)
+}
+
+def nestedWebId = findProperty("cx.internal.instance.web.id")
+
+if (nestedWebId != null) {
+	String bundleSafeName = gradle.liferayWorkspace.virtualInstanceId
+
+	tasks.named("createClientExtensionConfig") {
+		doLast {
+			File configFile = clientExtensionConfigFile
+
+			Map<String, Map> configurations = new JsonSlurper().parse(configFile)
+
+			configurations.values().each { Map properties ->
+				if (properties["dxp.lxc.liferay.com.virtualInstanceId"] == bundleSafeName) {
+					properties["dxp.lxc.liferay.com.virtualInstanceId"] = String.valueOf(nestedWebId)
+				}
+			}
+
+			configFile.setText(
+				new JsonGenerator.Options().disableUnicodeEscaping().build().toJson(configurations), "UTF-8")
+		}
+	}
+
+	return
 }
 
 String envName = String.valueOf(findProperty("cx.custom.deploy.env") ?: "").trim()
@@ -22,11 +52,13 @@ if (gradle.liferayWorkspace.virtualInstanceId) {
 			" is not compatible with cx.custom.one-per-instance")
 }
 
-List<String> webIds = String.valueOf(instancesValue).split(",").collect { it.trim() }.findAll { it }.unique()
+List<String> webIds = CXInstancesUtil.parseWebIds(envName, instancesValue)
 
 boolean includeDefault = webIds.contains("default")
 
 List<String> extraWebIds = webIds - ["default"]
+
+extraWebIds.each { CXInstancesUtil.validateForZipRegistration(it) }
 
 List<String> supportedTaskNames = ["assemble", "build", "buildClientExtensionZip", "deploy"]
 
@@ -74,7 +106,11 @@ def perInstanceTask = tasks.register("cxPerInstance") {
 		}
 
 		extraWebIds.each { String webId ->
-			logger.lifecycle("[cxperinstance] {} {} -> {}", projectPath, requestedTaskNames, webId)
+			String bundleSafeName = CXInstancesUtil.toBundleSafeName(webId)
+
+			logger.lifecycle(
+				"[cxperinstance] {} {} -> {}{}", projectPath, requestedTaskNames, webId,
+				bundleSafeName == webId ? "" : " (zip and bundle name: " + bundleSafeName + ")")
 
 			List<String> command = [new File(workspaceDir, windows ? "gradlew.bat" : "gradlew").absolutePath]
 
@@ -84,7 +120,11 @@ def perInstanceTask = tasks.register("cxPerInstance") {
 				command << "-P" + key + "=" + value
 			}
 
-			command << "-Pliferay.virtual.instance.id=" + webId
+			command << "-Pliferay.virtual.instance.id=" + bundleSafeName
+
+			if (bundleSafeName != webId) {
+				command << "-Pcx.internal.instance.web.id=" + webId
+			}
 
 			if (offline) {
 				command << "--offline"

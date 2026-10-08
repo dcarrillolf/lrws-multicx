@@ -1,3 +1,5 @@
+import com.liferay.custom.CXInstancesUtil
+
 if (!tasks.names.contains("createClientExtensionConfig")) {
 	throw new GradleException(
 		"Plugin com.liferay.custom.cxmultiinstance requires a client extension project: " + path)
@@ -21,11 +23,13 @@ if (instancesValue == null) {
 			"]=... to gradle.properties")
 }
 
-List<String> webIds = String.valueOf(instancesValue).split(",").collect { it.trim() }.findAll { it }.unique()
+List<String> webIds = CXInstancesUtil.parseWebIds(envName, instancesValue)
 
 boolean includeDefault = webIds.contains("default")
 
 List<String> extraWebIds = webIds - ["default"]
+
+extraWebIds.each { CXInstancesUtil.validateForZipRegistration(it) }
 
 def gradleVirtualInstanceId = gradle.liferayWorkspace.virtualInstanceId
 
@@ -75,7 +79,7 @@ tasks.named("createClientExtensionConfig") {
 		}
 
 		extraWebIds.each { String webId ->
-			String id = entry.key + "--" + webId.replace(".", "-")
+			String id = entry.key + "--" + CXInstancesUtil.toIdSuffix(webId)
 
 			def copyJsonNode = entry.value.deepCopy()
 
@@ -88,7 +92,7 @@ tasks.named("createClientExtensionConfig") {
 	File effectiveYamlFile = file("build/cx-multi-instance/client-extension." + envName + ".yaml")
 
 	inputs.property "cxMultiInstanceEnv", envName
-	inputs.property "cxMultiInstanceWebIds", webIds.join(",")
+	inputs.property "cxMultiInstanceWebIds", CXInstancesUtil.formatWebIds(webIds)
 
 	outputs.file effectiveYamlFile
 

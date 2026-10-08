@@ -1,3 +1,5 @@
+import com.liferay.custom.CXInstancesUtil
+
 import groovy.json.JsonSlurper
 
 if (!tasks.names.contains("createClientExtensionConfig")) {
@@ -33,7 +35,7 @@ tasks.register("generateCXConfig") {
 					envName + "]=... to gradle.properties")
 		}
 
-		List<String> webIds = String.valueOf(instancesValue).split(",").collect { it.trim() }.findAll { it }.unique()
+		List<String> webIds = CXInstancesUtil.parseWebIds(envName, instancesValue)
 
 		List<String> targetWebIds = webIds - ["default"]
 
@@ -115,7 +117,7 @@ tasks.register("generateCXConfig") {
 					escapeConfigValue(values.get(key, ""))
 				}
 
-				File configFile = new File(outputDir, filePrefix + webId.replace(".", "-") + ".config")
+				File configFile = new File(outputDir, filePrefix + CXInstancesUtil.toIdSuffix(webId) + ".config")
 
 				configFile.setText(content, "UTF-8")
 

@@ -30,7 +30,7 @@ See also:
 | Instance binding | `dxp.lxc.liferay.com.virtualInstanceId` in the zip | `liferay.virtual.instance.id` | One OSGi `.config` file per instance |
 | Static resources | Deployed once, shared by all instances (`/o/<project>/`) | Deployed once per instance (`/o/<project>_<webId>/`) | Deployed once with the standard zip, shared by all instances (`/o/<project>/`) |
 | Build time | One build | One Gradle run per instance | One build |
-| CX types | All | All | `customElement` only (PoC) |
+| CX types | All | All | `customElement` and `globalCSS` (PoC) |
 
 ## What's included
 
@@ -40,7 +40,7 @@ See also:
 | `buildSrc/src/main/groovy/com.liferay.custom.cxmultiinstance.gradle` | The `com.liferay.custom.cxmultiinstance` plugin (one zip, one block per instance). |
 | `buildSrc/src/main/groovy/com.liferay.custom.cxperinstance.gradle` | The `com.liferay.custom.cxperinstance` plugin (one zip per instance). |
 | `buildSrc/src/main/groovy/com.liferay.custom.cxconfig.gradle` | The `com.liferay.custom.cxconfig` plugin (`generateCXConfig` task, PoC). |
-| `buildSrc/src/main/resources/cx-config-templates/` | One `.config` template per CX type for `generateCXConfig`. Only `customElement.config` for now. |
+| `buildSrc/src/main/resources/cx-config-templates/` | One `.config` template per CX type for `generateCXConfig`. `customElement.config` and `globalCSS.config` for now. |
 | `buildSrc/src/main/groovy/com.liferay.custom.cxinstances.gradle` | The `com.liferay.custom.cxinstances` plugin (`retrieveCXInstances` task). |
 | `buildSrc/src/main/groovy/com/liferay/custom/PortalInstancesUtil.groovy` | Reads the web IDs of an installation through the `headless-portal-instances` API. |
 | `build.gradle` | Applies `cxinstances` to the root project and the plugins to every project under `client-extensions/`. `cxconfig` is always applied; the build plugins only when `cx.custom.deploy.env` is set. |
@@ -194,7 +194,7 @@ Each zip is a separate bundle with its own web context (`/o/<project>_<webId>/`)
 ## OSGi configuration files (PoC)
 
 > [!NOTE]
-> Proof of concept. Only `customElement` client extensions are supported.
+> Proof of concept. Only `customElement` and `globalCSS` client extensions are supported.
 
 Implements option 2 of [How to set up client extension to be used in multiple On-Premise instances](https://learn.liferay.com/kb-article/how-to-set-up-client-extension-to-be-used-in-multiple-on-premise-instances), as described in [Front-end client extension: how to automate deployments for remote apps in on-premises](https://liferay.dev/es/b/-front-end-client-extension-how-to-automate-deployments-for-remote-apps-in-on-premises). The standard zip is deployed once, and one OSGi configuration file per instance registers the client extension in that instance, pointing to the same static resources.
 
@@ -219,7 +219,7 @@ Then deploy:
 
 ### What it generates
 
-For each `customElement` block and each web ID other than `default`, one file in `configs/<env>/osgi/configs/`:
+For each supported block (`customElement`, `globalCSS`) and each web ID other than `default`, one file in `configs/<env>/osgi/configs/`:
 
 ```
 com.liferay.client.extension.type.configuration.CETConfiguration~liferay-sample-custom-element-1--localhost2.config
@@ -257,6 +257,15 @@ typeSettings=[ \
 ### Adding a CX type
 
 Add `buildSrc/src/main/resources/cx-config-templates/<type>.config` with the properties of that type and `@key@` placeholders. Keys are taken from the block (`name`, `baseURL`, ...) and from its `typeSettings`. Escape the `=` after each `typeSettings` key (`"url\=@url@"`).
+
+Use `@key?@` for optional keys: when the client extension has no value for that key, the whole line is removed. Put optional lines before the last element of the `typeSettings` array, so the array never ends with a comma. For example, in `globalCSS.config`:
+
+```properties
+typeSettings=[ \
+  "scope\=@scope?@", \
+  "url\=@url@" \
+]
+```
 
 ### Limitations
 

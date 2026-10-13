@@ -109,13 +109,21 @@ tasks.register("generateCXConfig") {
 			targetWebIds.each { String webId ->
 				values["virtualInstanceId"] = webId
 
-				String content = template.replaceAll(/@([A-Za-z0-9_.]+)@/) { String placeholder, String key ->
-					if (!values.containsKey(key)) {
+				List<String> lines = template.readLines().findAll { String line ->
+					List<String> optionalKeys = (line =~ /@([A-Za-z0-9_.]+)\?@/).collect { it[1] }
+
+					optionalKeys.every { values.get(it) }
+				}
+
+				String content = lines.join("\n").replaceAll(/@([A-Za-z0-9_.]+)(\??)@/) {
+					String placeholder, String key, String optional ->
+
+					if (!optional && !values.containsKey(key)) {
 						logger.warn("[cxconfig] {} has no value for {} in {}", id, key, type + ".config")
 					}
 
 					escapeConfigValue(values.get(key, ""))
-				}
+				} + "\n"
 
 				File configFile = new File(outputDir, filePrefix + CXInstancesUtil.toIdSuffix(webId) + ".config")
 

@@ -30,7 +30,7 @@ See also:
 | Instance binding | `dxp.lxc.liferay.com.virtualInstanceId` in the zip | `liferay.virtual.instance.id` | One OSGi `.config` file per instance |
 | Static resources | Deployed once, shared by all instances (`/o/<project>/`) | Deployed once per instance (`/o/<project>_<webId>/`) | Deployed once with the standard zip, shared by all instances (`/o/<project>/`) |
 | Build time | One build | One Gradle run per instance | One build |
-| CX types | All | All | `customElement` and `globalCSS` (PoC) |
+| CX types | All | All | Frontend types with a template: `customElement`, `globalCSS`, `globalJS`, `jsImportMapsEntry` and `themeCSS` (PoC) |
 
 ## What's included
 
@@ -40,7 +40,7 @@ See also:
 | `buildSrc/src/main/groovy/com.liferay.custom.cxmultiinstance.gradle` | The `com.liferay.custom.cxmultiinstance` plugin (one zip, one block per instance). |
 | `buildSrc/src/main/groovy/com.liferay.custom.cxperinstance.gradle` | The `com.liferay.custom.cxperinstance` plugin (one zip per instance). |
 | `buildSrc/src/main/groovy/com.liferay.custom.cxconfig.gradle` | The `com.liferay.custom.cxconfig` plugin (`generateCXConfig` task, PoC). |
-| `buildSrc/src/main/resources/cx-config-templates/` | One `.config` template per CX type for `generateCXConfig`. `customElement.config` and `globalCSS.config` for now. |
+| `buildSrc/src/main/resources/cx-config-templates/` | One `.config` template per CX type for `generateCXConfig`. Available for `customElement`, `globalCSS`, `globalJS`, `jsImportMapsEntry` and `themeCSS`. |
 | `buildSrc/src/main/groovy/com.liferay.custom.cxinstances.gradle` | The `com.liferay.custom.cxinstances` plugin (`retrieveCXInstances` task). |
 | `buildSrc/src/main/groovy/com/liferay/custom/PortalInstancesUtil.groovy` | Reads the web IDs of an installation through the `headless-portal-instances` API. |
 | `build.gradle` | Applies `cxinstances` to the root project and the plugins to every project under `client-extensions/`. `cxconfig` is always applied; the build plugins only when `cx.custom.deploy.env` is set. |
@@ -194,9 +194,25 @@ Each zip is a separate bundle with its own web context (`/o/<project>_<webId>/`)
 ## OSGi configuration files (PoC)
 
 > [!NOTE]
-> Proof of concept. Only `customElement` and `globalCSS` client extensions are supported.
+> Proof of concept. Supported client extension types: `customElement`, `globalCSS`, `globalJS`, `jsImportMapsEntry` and `themeCSS`.
 
 Implements option 2 of [How to set up client extension to be used in multiple On-Premise instances](https://learn.liferay.com/kb-article/how-to-set-up-client-extension-to-be-used-in-multiple-on-premise-instances), as described in [Front-end client extension: how to automate deployments for remote apps in on-premises](https://liferay.dev/es/b/-front-end-client-extension-how-to-automate-deployments-for-remote-apps-in-on-premises). The standard zip is deployed once, and one OSGi configuration file per instance registers the client extension in that instance, pointing to the same static resources.
+
+### Supported types
+
+| Type | Template | Required keys | Optional keys |
+|---|---|---|---|
+| `customElement` | `customElement.config` | `htmlElementName`, `urls`, `cssURLs`, `friendlyURLMapping`, `instanceable`, `portletCategoryName`, `useESM` | — |
+| `globalCSS` | `globalCSS.config` | `url` | `scope` |
+| `globalJS` | `globalJS.config` | `url` | `scope`, `scriptElementAttributesJSON`, `scriptLocation` |
+| `jsImportMapsEntry` | `jsImportMapsEntry.config` | `bareSpecifier`, `url` | — |
+| `themeCSS` | `themeCSS.config` | `clayURL`, `mainURL` | `clayRTLURL`, `mainRTLURL`, `frontendTokenDefinitionJSON`, `scope` |
+
+The values come from the JSON that Liferay Workspace generates for the zip, so they match what the standard deployment registers in the default instance:
+
+- `globalJS`: `scriptElementAttributes` in `client-extension.yaml` becomes `scriptElementAttributesJSON`.
+- `themeCSS`: the file referenced by `frontendTokenDefinitionJSON` is inlined as compact JSON, which can make the `.config` file large.
+- `scope` accepts `company` or `layout` for `globalCSS` and `globalJS`, and `controlPanel` or `layout` for `themeCSS`. Liferay Workspace validates it at build time.
 
 ### Usage
 
@@ -219,7 +235,7 @@ Then deploy:
 
 ### What it generates
 
-For each supported block (`customElement`, `globalCSS`) and each web ID other than `default`, one file in `configs/<env>/osgi/configs/`:
+For each block of a supported type and each web ID other than `default`, one file in `configs/<env>/osgi/configs/`:
 
 ```
 com.liferay.client.extension.type.configuration.CETConfiguration~liferay-sample-custom-element-1--localhost2.config

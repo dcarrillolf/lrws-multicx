@@ -4,5 +4,7 @@ assemble:
         into: static
 liferay-sample-global-js-1:
     name: Liferay Sample Global JS 1
+    scope: company
+    scriptLocation: head
     type: globalJS
     url: global.*.js
